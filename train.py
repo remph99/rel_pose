@@ -24,6 +24,7 @@ from tqdm import tqdm
 import random
 from datetime import datetime
 import os
+from contextlib import nullcontext
 
 def setup_ddp(gpu, args):
     dist.init_process_group(                                   
@@ -37,6 +38,8 @@ def setup_ddp(gpu, args):
 
 def train(gpu, args):
     """ Test to make sure project transform correctly maps points """
+    if args.grad_accum_steps < 1:
+        raise ValueError("--grad_accum_steps must be >= 1")
 
     # coordinate multiple GPUs
     if not args.no_ddp:
@@ -135,11 +138,11 @@ def train(gpu, args):
 
         if not is_training:
             model.eval()
+        else:
+            optimizer.zero_grad(set_to_none=True)
 
         with tqdm(train_loader, unit="batch") as tepoch:
             for i_batch, item in enumerate(tepoch):
-                optimizer.zero_grad()
-
                 images, poses, intrinsics = [x.to('cuda') for x in item]
                 Ps = SE3(poses)
                 Gs = SE3.IdentityLike(Ps)
@@ -152,18 +155,28 @@ def train(gpu, args):
                         poses_est = model(images, Gs, intrinsics=intrinsics)
                         geo_loss_tr, geo_loss_rot, geo_metrics = geodesic_loss(Ps_out, poses_est, train_val=train_val)
                 else:
-                    poses_est = model(images, Gs, intrinsics=intrinsics)
-                    geo_loss_tr, geo_loss_rot, geo_metrics = geodesic_loss(Ps_out, poses_est, train_val=train_val)
+                    should_step = ((i_batch + 1) % args.grad_accum_steps == 0) or ((i_batch + 1) == len(train_loader))
+                    sync_context = nullcontext()
+                    if (not args.no_ddp) and (not should_step):
+                        sync_context = model.no_sync()
 
-                    loss = args.w_tr * geo_loss_tr + args.w_rot * geo_loss_rot
+                    with sync_context:
+                        poses_est = model(images, Gs, intrinsics=intrinsics)
+                        geo_loss_tr, geo_loss_rot, geo_metrics = geodesic_loss(Ps_out, poses_est, train_val=train_val)
 
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-                    optimizer.step()
-                    Gs = poses_est[-1].detach()
-                    
-                    scheduler.step() 
-                    train_steps += 1
+                        loss = args.w_tr * geo_loss_tr + args.w_rot * geo_loss_rot
+                        loss = loss / args.grad_accum_steps
+
+                        loss.backward()
+
+                    if should_step:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+                        optimizer.step()
+                        optimizer.zero_grad(set_to_none=True)
+                        Gs = poses_est[-1].detach()
+
+                        scheduler.step()
+                        train_steps += 1
                 
                 metrics.update(geo_metrics)                                    
 
@@ -224,6 +237,7 @@ if __name__ == '__main__':
     parser.add_argument('--steps', type=int, default=120000)
     parser.add_argument('--lr', type=float, default=5e-4)
     parser.add_argument('--clip', type=float, default=2.5)
+    parser.add_argument('--grad_accum_steps', type=int, default=1)
     parser.add_argument('--weight_decay', type=float, default=1e-5)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--no_ddp', action="store_true", default=False)
