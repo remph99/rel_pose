@@ -45,7 +45,6 @@ def train(gpu, args):
     """
     if args.grad_accum_steps < 1:
         raise ValueError("--grad_accum_steps must be >= 1")
-    inv_grad_accum = 1.0 / args.grad_accum_steps
 
     # coordinate multiple GPUs
     if not args.no_ddp:
@@ -163,6 +162,11 @@ def train(gpu, args):
                 else:
                     # Flush gradients on accumulation boundary and on the last partial micro-batch.
                     should_step = (i_batch + 1) % args.grad_accum_steps == 0 or (i_batch + 1) == len(train_loader)
+                    micro_batches_in_step = args.grad_accum_steps
+                    if (i_batch + 1) == len(train_loader):
+                        remainder = len(train_loader) % args.grad_accum_steps
+                        if remainder != 0:
+                            micro_batches_in_step = remainder
                     sync_context = nullcontext()
                     if (not args.no_ddp) and (not should_step):
                         sync_context = model.no_sync()
@@ -172,7 +176,7 @@ def train(gpu, args):
                         geo_loss_tr, geo_loss_rot, geo_metrics = geodesic_loss(Ps_out, poses_est, train_val=train_val)
 
                         loss = args.w_tr * geo_loss_tr + args.w_rot * geo_loss_rot
-                        loss = loss * inv_grad_accum
+                        loss = loss * (1.0 / micro_batches_in_step)
 
                         loss.backward()
 
@@ -180,7 +184,6 @@ def train(gpu, args):
                         torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
                         optimizer.step()
                         optimizer.zero_grad(set_to_none=True)
-                        Gs = poses_est[-1].detach()
 
                         scheduler.step()
                         train_steps += 1
