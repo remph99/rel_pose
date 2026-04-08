@@ -160,7 +160,7 @@ def train(gpu, args):
                         poses_est = model(images, Gs, intrinsics=intrinsics)
                         geo_loss_tr, geo_loss_rot, geo_metrics = geodesic_loss(Ps_out, poses_est, train_val=train_val)
                 else:
-                    # Flush gradients on accumulation boundary and on the last partial micro-batch.
+                    # Step optimizer on accumulation boundary and on the last partial micro-batch.
                     should_step = (i_batch + 1) % args.grad_accum_steps == 0 or (i_batch + 1) == len(train_loader)
                     micro_batches_in_step = args.grad_accum_steps
                     if (i_batch + 1) == len(train_loader):
