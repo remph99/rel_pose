@@ -37,7 +37,7 @@ def setup_ddp(gpu, args):
     torch.cuda.set_device(gpu)
 
 def train(gpu, args):
-    """ Test to make sure project transform correctly maps points """
+    """Run distributed/non-distributed training and periodic validation."""
     if args.grad_accum_steps < 1:
         raise ValueError("--grad_accum_steps must be >= 1")
 
@@ -155,6 +155,7 @@ def train(gpu, args):
                         poses_est = model(images, Gs, intrinsics=intrinsics)
                         geo_loss_tr, geo_loss_rot, geo_metrics = geodesic_loss(Ps_out, poses_est, train_val=train_val)
                 else:
+                    # Flush gradients on accumulation boundary and on the last partial micro-batch.
                     should_step = ((i_batch + 1) % args.grad_accum_steps == 0) or ((i_batch + 1) == len(train_loader))
                     sync_context = nullcontext()
                     if (not args.no_ddp) and (not should_step):
