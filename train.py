@@ -37,9 +37,15 @@ def setup_ddp(gpu, args):
     torch.cuda.set_device(gpu)
 
 def train(gpu, args):
-    """Run distributed/non-distributed training and periodic validation."""
+    """Run training on one process/GPU with optional DDP and gradient accumulation.
+
+    Args:
+        gpu: Rank-local GPU index used by this process.
+        args: Parsed CLI arguments including optimization and data options.
+    """
     if args.grad_accum_steps < 1:
         raise ValueError("--grad_accum_steps must be >= 1")
+    inv_grad_accum = 1.0 / args.grad_accum_steps
 
     # coordinate multiple GPUs
     if not args.no_ddp:
@@ -156,7 +162,7 @@ def train(gpu, args):
                         geo_loss_tr, geo_loss_rot, geo_metrics = geodesic_loss(Ps_out, poses_est, train_val=train_val)
                 else:
                     # Flush gradients on accumulation boundary and on the last partial micro-batch.
-                    should_step = ((i_batch + 1) % args.grad_accum_steps == 0) or ((i_batch + 1) == len(train_loader))
+                    should_step = (i_batch + 1) % args.grad_accum_steps == 0 or (i_batch + 1) == len(train_loader)
                     sync_context = nullcontext()
                     if (not args.no_ddp) and (not should_step):
                         sync_context = model.no_sync()
@@ -166,7 +172,7 @@ def train(gpu, args):
                         geo_loss_tr, geo_loss_rot, geo_metrics = geodesic_loss(Ps_out, poses_est, train_val=train_val)
 
                         loss = args.w_tr * geo_loss_tr + args.w_rot * geo_loss_rot
-                        loss = loss / args.grad_accum_steps
+                        loss = loss * inv_grad_accum
 
                         loss.backward()
 
