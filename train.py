@@ -209,7 +209,8 @@ def train(gpu, args):
             epoch_count += 1
 
     print("finished training!")
-    dist.destroy_process_group()
+    if dist.is_available() and dist.is_initialized():
+        dist.destroy_process_group()
 
 if __name__ == '__main__':
     import argparse
