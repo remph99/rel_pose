@@ -48,14 +48,14 @@ def eval_camera(predictions):
     pred_tran_norm = np.linalg.norm(pred_tran, axis=1)
     valid_tran_angle = (gt_tran_norm > min_norm) & (pred_tran_norm > min_norm)
     tran_cos = np.sum(gt_tran * pred_tran, axis=1) / (gt_tran_norm * pred_tran_norm + eps)
-    tran_cos = np.clip(tran_cos, -1.0 + 1e-6, 1.0 - 1e-6)
+    tran_cos = np.clip(tran_cos, -1.0, 1.0)
     tran_angle = np.arccos(tran_cos) * 180 / np.pi
     if valid_tran_angle.any():
         tran_angle_mean = np.mean(tran_angle[valid_tran_angle])
         tran_angle_median = np.median(tran_angle[valid_tran_angle])
     else:
-        tran_angle_mean = 0.0
-        tran_angle_median = 0.0
+        tran_angle_mean = np.nan
+        tran_angle_median = np.nan
     top1_accuracy = {
         "tran": (top1_error["tran"] < acc_threshold["tran"]).sum()
         / len(top1_error["tran"]),
