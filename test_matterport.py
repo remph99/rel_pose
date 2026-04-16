@@ -40,6 +40,22 @@ def eval_camera(predictions):
         "tran": np.linalg.norm(gt_tran - pred_tran, axis=1),
         "rot": 2 * np.arccos(np.clip(np.abs(np.sum(np.multiply(pred_rot, gt_rot), axis=1)), -1.0, 1.0)) * 180 / np.pi,
     }
+
+    # translation angular error (deg): angle between predicted and GT translation vectors
+    eps = 1e-8
+    min_norm = 1e-6
+    gt_tran_norm = np.linalg.norm(gt_tran, axis=1)
+    pred_tran_norm = np.linalg.norm(pred_tran, axis=1)
+    valid_tran_angle = (gt_tran_norm > min_norm) & (pred_tran_norm > min_norm)
+    tran_cos = np.sum(gt_tran * pred_tran, axis=1) / (gt_tran_norm * pred_tran_norm + eps)
+    tran_cos = np.clip(tran_cos, -1.0 + 1e-6, 1.0 - 1e-6)
+    tran_angle = np.arccos(tran_cos) * 180 / np.pi
+    if valid_tran_angle.any():
+        tran_angle_mean = np.mean(tran_angle[valid_tran_angle])
+        tran_angle_median = np.median(tran_angle[valid_tran_angle])
+    else:
+        tran_angle_mean = 0.0
+        tran_angle_median = 0.0
     top1_accuracy = {
         "tran": (top1_error["tran"] < acc_threshold["tran"]).sum()
         / len(top1_error["tran"]),
@@ -53,6 +69,8 @@ def eval_camera(predictions):
         f"R mean err": np.mean(top1_error["rot"]),
         f"T median err": np.median(top1_error["tran"]),
         f"R median err": np.median(top1_error["rot"]),
+        "T angle mean err": tran_angle_mean,
+        "T angle median err": tran_angle_median,
     }
     
     gt_mags = {"tran": np.linalg.norm(gt_tran, axis=1), "rot": 2 * np.arccos(gt_rot[:,0]) * 180 / np.pi}
