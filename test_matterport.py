@@ -23,6 +23,7 @@ import json
 from lietorch import SE3
 
 DEPTH_SCALE = 5
+TRAN_ANGLE_MIN_NORM = 1e-6
 
 def eval_camera(predictions):
     acc_threshold = {
@@ -42,12 +43,13 @@ def eval_camera(predictions):
     }
 
     # translation angular error (deg): angle between predicted and GT translation vectors
-    eps = 1e-8
-    min_norm = 1e-6
     gt_tran_norm = np.linalg.norm(gt_tran, axis=1)
     pred_tran_norm = np.linalg.norm(pred_tran, axis=1)
-    valid_tran_angle = (gt_tran_norm > min_norm) & (pred_tran_norm > min_norm)
-    tran_cos = np.sum(gt_tran * pred_tran, axis=1) / (gt_tran_norm * pred_tran_norm + eps)
+    valid_tran_angle = (gt_tran_norm > TRAN_ANGLE_MIN_NORM) & (pred_tran_norm > TRAN_ANGLE_MIN_NORM)
+    dot = np.sum(gt_tran * pred_tran, axis=1)
+    den = gt_tran_norm * pred_tran_norm
+    tran_cos = np.ones_like(den)
+    np.divide(dot, den, out=tran_cos, where=valid_tran_angle)
     tran_cos = np.clip(tran_cos, -1.0, 1.0)
     tran_angle = np.arccos(tran_cos) * 180 / np.pi
     if valid_tran_angle.any():
