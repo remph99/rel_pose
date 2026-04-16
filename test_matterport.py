@@ -23,6 +23,7 @@ import json
 from lietorch import SE3
 
 DEPTH_SCALE = 5
+TRAN_ANGLE_MIN_NORM = 1e-6
 
 def eval_camera(predictions):
     acc_threshold = {
@@ -40,6 +41,24 @@ def eval_camera(predictions):
         "tran": np.linalg.norm(gt_tran - pred_tran, axis=1),
         "rot": 2 * np.arccos(np.clip(np.abs(np.sum(np.multiply(pred_rot, gt_rot), axis=1)), -1.0, 1.0)) * 180 / np.pi,
     }
+
+    # translation angular error (deg): angle between predicted and GT translation vectors
+    gt_tran_norm = np.linalg.norm(gt_tran, axis=1)
+    pred_tran_norm = np.linalg.norm(pred_tran, axis=1)
+    valid_tran_angle = (gt_tran_norm > TRAN_ANGLE_MIN_NORM) & (pred_tran_norm > TRAN_ANGLE_MIN_NORM)
+    dot = np.sum(gt_tran * pred_tran, axis=1)
+    den = gt_tran_norm * pred_tran_norm
+    tran_cos = np.full_like(den, np.nan)
+    np.divide(dot, den, out=tran_cos, where=valid_tran_angle)
+    tran_angle = np.full_like(den, np.nan)
+    tran_cos_valid = np.clip(tran_cos[valid_tran_angle], -1.0, 1.0)
+    tran_angle[valid_tran_angle] = np.arccos(tran_cos_valid) * 180 / np.pi
+    if valid_tran_angle.any():
+        tran_angle_mean = np.mean(tran_angle[valid_tran_angle])
+        tran_angle_median = np.median(tran_angle[valid_tran_angle])
+    else:
+        tran_angle_mean = np.nan
+        tran_angle_median = np.nan
     top1_accuracy = {
         "tran": (top1_error["tran"] < acc_threshold["tran"]).sum()
         / len(top1_error["tran"]),
@@ -53,6 +72,8 @@ def eval_camera(predictions):
         f"R mean err": np.mean(top1_error["rot"]),
         f"T median err": np.median(top1_error["tran"]),
         f"R median err": np.median(top1_error["rot"]),
+        "T angle mean err": tran_angle_mean,
+        "T angle median err": tran_angle_median,
     }
     
     gt_mags = {"tran": np.linalg.norm(gt_tran, axis=1), "rot": 2 * np.arccos(gt_rot[:,0]) * 180 / np.pi}
