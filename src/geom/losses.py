@@ -24,18 +24,15 @@
 import torch
 
 def geodesic_loss(Ps, Gs, train_val='train'):
-    """ Translation uses angular loss; rotation keeps geodesic loss. """
+    ii, jj = torch.tensor([0, 1], device=Ps.data.device), torch.tensor([1, 0], device=Ps.data.device)
 
-    ii, jj = torch.tensor([0, 1]), torch.tensor([1, 0])
+    # GT / Pred relative pose
+    dP = Ps[:, jj] * Ps[:, ii].inv()      # GT
+    dG = Gs[0][:, jj] * Gs[0][:, ii].inv()  # Pred
 
-    # relative pose: GT and prediction
-    dP = Ps[:, jj] * Ps[:, ii].inv()
-    dG = Gs[0][:, jj] * Gs[0][:, ii].inv()
-
-    # ---------- translation angular loss ----------
-    # SE3 data layout in this repo: [tx, ty, tz, qx, qy, qz, qw]
-    t_gt = dP.data[..., :3]
-    t_pr = dG.data[..., :3]
+    # translation angular loss
+    t_gt = dP[..., :3]
+    t_pr = dG[..., :3]
 
     eps = 1e-8
     min_norm = 1e-6
@@ -46,14 +43,14 @@ def geodesic_loss(Ps, Gs, train_val='train'):
 
     cos_sim = (t_gt * t_pr).sum(dim=-1) / (n_gt * n_pr + eps)
     cos_sim = torch.clamp(cos_sim, -1.0 + 1e-6, 1.0 - 1e-6)
-    tr_angle = torch.acos(cos_sim)  # radians in [0, pi]
+    tr_angle = torch.acos(cos_sim)
 
     if valid.any():
         geodesic_loss_tr = tr_angle[valid].mean()
     else:
         geodesic_loss_tr = torch.zeros([], device=t_gt.device, dtype=t_gt.dtype)
 
-    # ---------- rotation geodesic loss (unchanged) ----------
+    # rotation geodesic loss
     d = (dG * dP.inv()).log()
     _, phi = d.split([3, 3], dim=-1)
     geodesic_loss_rot = phi.norm(dim=-1).mean()
@@ -62,6 +59,5 @@ def geodesic_loss(Ps, Gs, train_val='train'):
         train_val + '_geo_loss_tr': geodesic_loss_tr.detach().item(),
         train_val + '_geo_loss_rot': geodesic_loss_rot.detach().item(),
     }
-
     return geodesic_loss_tr, geodesic_loss_rot, metrics
 
